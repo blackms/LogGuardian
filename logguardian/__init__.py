@@ -6,3 +6,7 @@ anomalies in system logs.
 """
 
 __version__ = "0.1.0"
+
+from logguardian.pipeline import LogGuardian
+
+__all__ = ["LogGuardian"]
