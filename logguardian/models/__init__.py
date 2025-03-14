@@ -9,5 +9,11 @@ This package contains modules for:
 
 from logguardian.models.feature_extraction import BertFeatureExtractor
 from logguardian.models.embedding_alignment import EmbeddingProjector
+from logguardian.models.classification import BaseLogClassifier, LlamaLogClassifier
 
-__all__ = ["BertFeatureExtractor", "EmbeddingProjector"]
+__all__ = [
+    "BertFeatureExtractor", 
+    "EmbeddingProjector",
+    "BaseLogClassifier",
+    "LlamaLogClassifier"
+]
