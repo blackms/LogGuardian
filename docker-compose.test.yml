@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  logguardian-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_TAG:-logguardian:test}
+    container_name: logguardian-test
+    command: python -m pytest tests/ -v
+    volumes:
+      - ./tests:/app/tests
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=DEBUG
+      - TEST_MODE=1
+    networks:
+      - logguardian-network
+
+  logguardian-api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_TAG:-logguardian:test}
+    container_name: logguardian-api-test
+    command: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./tests:/app/tests
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      - LOG_LEVEL=DEBUG
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_WORKERS=1
+      - ENABLE_AUTH=false
+      - TEST_MODE=1
+    networks:
+      - logguardian-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  integration-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_TAG:-logguardian:test}
+    container_name: logguardian-integration-test
+    command: python -m pytest tests/integration -v
+    volumes:
+      - ./tests:/app/tests
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=DEBUG
+      - TEST_MODE=1
+      - API_URL=http://logguardian-api-test:8000
+    networks:
+      - logguardian-network
+    depends_on:
+      logguardian-api-test:
+        condition: service_healthy
+
+networks:
+  logguardian-network:
+    driver: bridge
