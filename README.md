@@ -4,6 +4,8 @@
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.13%2B-red)](https://pytorch.org/)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Transformers-green)](https://huggingface.co/docs/transformers/index)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/example/logguardian/ci.yml?branch=main)](https://github.com/example/logguardian/actions)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://github.com/example/logguardian/pkgs/container/logguardian)
 
 ## 📋 Table of Contents
 
@@ -12,13 +14,20 @@
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+  - [Python Package](#option-1-install-from-pypi-recommended)
+  - [Source Code](#option-2-install-from-source)
+  - [Docker](#option-3-docker-container)
 - [Getting Started](#getting-started)
 - [Usage Examples](#usage-examples)
+  - [Python Library](#python-library)
+  - [REST API](#rest-api)
+  - [Docker Deployment](#docker-deployment)
 - [API Reference](#api-reference)
 - [Configuration Options](#configuration-options)
 - [Datasets](#datasets)
 - [Training](#training)
 - [Evaluation](#evaluation)
+- [Monitoring](#monitoring)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
@@ -51,9 +60,10 @@ LogGuardian is designed for:
   - Thunderbird (Thunderbird supercomputer logs)
 - **High Accuracy**: Achieves F1-scores above 0.95 on benchmark datasets
 - **Evaluation Framework**: Includes metrics, evaluator, and benchmark tools for rigorous performance assessment
+- **Production Ready**: Docker containerization, REST API, CI/CD pipelines, and monitoring
 - **Resource Efficient**: Uses QLoRA for memory-efficient fine-tuning
 - **Flexible Pipeline**: Modular design allows component replacement or customization
-- **Easy Integration**: Simple API for incorporating into existing monitoring systems
+- **Easy Integration**: REST API and Docker support for incorporating into existing monitoring systems
 
 ## 🏗️ Architecture
 
@@ -90,6 +100,19 @@ graph TD
 2. **Stage 2**: Train the embedder (BERT + projector) while keeping the fine-tuned Llama frozen
 3. **Stage 3**: Fine-tune the entire model end-to-end for optimal performance
 
+### Deployment Architecture
+
+LogGuardian can be deployed as a standalone service using Docker:
+
+```mermaid
+graph TD
+    A[Log Sources] --> B[LogGuardian API]
+    B --> C[LogGuardian Core]
+    C --> D[Results]
+    B --> E[Prometheus Metrics]
+    E --> F[Grafana Dashboard]
+```
+
 ## 🔧 Prerequisites
 
 Before installing LogGuardian, ensure you have the following:
@@ -103,6 +126,7 @@ Before installing LogGuardian, ensure you have the following:
 
 - [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) (11.7+ recommended)
 - [Git](https://git-scm.com/downloads) for cloning the repository
+- [Docker](https://www.docker.com/products/docker-desktop/) (optional, for containerized deployment)
 
 ## 📦 Installation
 
@@ -135,6 +159,19 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
+### Option 3: Docker Container
+
+```bash
+# Pull the Docker image
+docker pull ghcr.io/example/logguardian:latest
+
+# Or build locally
+docker build -t logguardian:latest .
+
+# Run the container
+docker run --gpus all -p 8000:8000 logguardian:latest
+```
+
 ## 🚀 Getting Started
 
 Here's a quick example to get you started with LogGuardian:
@@ -163,7 +200,9 @@ for log, is_anomaly in zip(logs, results):
 
 ## 📝 Usage Examples
 
-### Basic Anomaly Detection
+### Python Library
+
+#### Basic Anomaly Detection
 
 ```python
 from logguardian import LogGuardian
@@ -183,7 +222,7 @@ anomaly_count = sum(results)
 print(f"Found {anomaly_count} anomalies in {len(logs)} log messages")
 ```
 
-### Working with Sliding Windows
+#### Working with Sliding Windows
 
 ```python
 from logguardian import LogGuardian
@@ -194,7 +233,7 @@ detector = LogGuardian()
 results = detector.detect(logs, window_size=20, stride=10)
 ```
 
-### Getting Detailed Results
+#### Getting Detailed Results
 
 ```python
 from logguardian import LogGuardian
@@ -209,7 +248,7 @@ for result in detailed_results:
     print(f"Label: {result['label']}, Confidence: {result['confidence']}")
 ```
 
-### Using Custom Preprocessor
+#### Using Custom Preprocessor
 
 ```python
 from logguardian import LogGuardian
@@ -231,7 +270,7 @@ detector = LogGuardian(preprocessor=preprocessor)
 results = detector.detect(logs)
 ```
 
-### Saving and Loading Models
+#### Saving and Loading Models
 
 ```python
 from logguardian import LogGuardian
@@ -248,6 +287,109 @@ loaded_detector = LogGuardian.load("path/to/saved/model")
 
 # Use the loaded model
 results = loaded_detector.detect(logs)
+```
+
+### REST API
+
+#### Making API Requests
+
+```python
+import requests
+import json
+
+# API endpoint
+api_url = "http://localhost:8000/detect"
+
+# Prepare logs data
+logs_data = {
+    "logs": [
+        {
+            "message": "2023-02-15 10:12:34 INFO Server starting",
+            "timestamp": "2023-02-15T10:12:34Z",
+            "source": "web-server-1"
+        },
+        {
+            "message": "2023-02-15 10:12:40 ERROR Database connection failed",
+            "timestamp": "2023-02-15T10:12:40Z",
+            "source": "web-server-1"
+        }
+    ],
+    "window_size": 10,
+    "stride": 5,
+    "batch_size": 16,
+    "raw_output": True
+}
+
+# Send request
+response = requests.post(api_url, json=logs_data)
+
+# Process results
+if response.status_code == 200:
+    results = response.json()
+    for result in results["results"]:
+        print(f"Source: {result['source']}")
+        print(f"Timestamp: {result['timestamp']}")
+        print(f"Label: {result['label']}")
+        print(f"Confidence: {result['confidence']}")
+else:
+    print(f"Error: {response.status_code} - {response.text}")
+```
+
+#### Using cURL
+
+```bash
+curl -X POST http://localhost:8000/detect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "logs": [
+      {
+        "message": "2023-02-15 10:12:34 INFO Server starting",
+        "timestamp": "2023-02-15T10:12:34Z",
+        "source": "web-server-1"
+      },
+      {
+        "message": "2023-02-15 10:12:40 ERROR Database connection failed",
+        "timestamp": "2023-02-15T10:12:40Z",
+        "source": "web-server-1"
+      }
+    ],
+    "window_size": 10,
+    "raw_output": true
+  }'
+```
+
+### Docker Deployment
+
+#### Basic Deployment
+
+```bash
+# Start LogGuardian API service
+docker compose up -d logguardian-api
+
+# Check logs
+docker compose logs -f logguardian-api
+```
+
+#### With Monitoring
+
+```bash
+# Start LogGuardian with monitoring stack
+docker compose --profile monitoring up -d
+
+# Access Grafana dashboard at http://localhost:3000
+# Default credentials: admin/admin
+```
+
+#### Custom Configuration
+
+```bash
+# Create a custom configuration file
+mkdir -p config
+cp config/model_config.json config/custom_config.json
+# Edit config/custom_config.json as needed
+
+# Start with custom configuration
+docker compose -f docker-compose.yml -f docker-compose.custom.yml up -d
 ```
 
 ## 📘 API Reference
@@ -433,6 +575,60 @@ LogAnomalyBenchmark(
 - `run(method_names=None, dataset_names=None, save_results=True, generate_report=True, train_methods=True, **kwargs)`: Run benchmark
 - `generate_report(benchmark_results=None, output_file=None)`: Generate benchmark report
 - `create_comparison_visualizations(metric="f1", output_dir=None)`: Create comparative visualizations
+
+### REST API Endpoints
+
+#### `GET /health`
+
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "uptime": 3600.5
+}
+```
+
+#### `POST /detect`
+
+Detect anomalies in log sequences.
+
+**Request Body:**
+```json
+{
+  "logs": [
+    {
+      "message": "Log message content",
+      "timestamp": "2023-02-15T10:12:34Z",
+      "source": "web-server-1"
+    }
+  ],
+  "window_size": 10,
+  "stride": 5,
+  "batch_size": 16,
+  "raw_output": true
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "label": "anomaly",
+      "label_id": 1,
+      "confidence": 0.95,
+      "scores": [0.05, 0.95],
+      "timestamp": "2023-02-15T10:12:34Z",
+      "source": "web-server-1"
+    }
+  ],
+  "inference_time": 0.152,
+  "processing_time": 0.175
+}
+```
 
 ## ⚙️ Configuration Options
 
@@ -745,6 +941,39 @@ LogGuardian includes a comprehensive benchmark example script:
 python -m logguardian.examples.benchmark_example --data_dir path/to/datasets --datasets hdfs bgl liberty thunderbird --include_baselines --output_dir benchmark_results
 ```
 
+## 📊 Monitoring
+
+LogGuardian includes a monitoring setup using Prometheus and Grafana.
+
+### Starting the Monitoring Stack
+
+```bash
+# Start the monitoring services
+docker compose --profile monitoring up -d
+```
+
+### Accessing Dashboards
+
+- **Grafana**: http://localhost:3000 (default credentials: admin/admin)
+- **Prometheus**: http://localhost:9090
+
+### Available Metrics
+
+LogGuardian exposes the following metrics:
+
+- **logguardian_requests_total**: Total number of API requests
+- **logguardian_request_duration_seconds**: Request duration histogram
+- **logguardian_anomalies_detected_total**: Total number of anomalies detected
+- **logguardian_model_inference_seconds**: Model inference time histogram
+
+### Custom Dashboards
+
+You can create custom Grafana dashboards by placing JSON dashboard definitions in:
+
+```
+monitoring/grafana/provisioning/dashboards/
+```
+
 ## 🔍 Troubleshooting
 
 ### Common Issues and Solutions
@@ -804,6 +1033,16 @@ tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3-8b")
 tokenizer.pad_token = tokenizer.eos_token
 ```
 
+#### Docker Deployment Issues
+
+**Problem**: Docker container fails to start or crashes
+
+**Solution**:
+- Check GPU availability and driver compatibility
+- Ensure sufficient memory is allocated to Docker
+- Check logs with `docker compose logs logguardian-api`
+- Verify volume mounts and permissions
+
 ### Debugging Tips
 
 - Enable detailed logging with `loguru`:
@@ -820,6 +1059,7 @@ logger.add(sys.stderr, level="DEBUG")
 - Run with smaller datasets first to validate your setup
 - Test each component separately before running the full pipeline
 - Use the `raw_output=True` option to get detailed classification results for debugging
+- For API debugging, check the health endpoint: `curl http://localhost:8000/health`
 
 ## 🤝 Contributing
 
@@ -863,6 +1103,15 @@ mypy logguardian
 pytest
 ```
 
+### Continuous Integration
+
+LogGuardian uses GitHub Actions for CI/CD:
+
+- **CI Workflow**: Runs tests, linting, and type checking
+- **Docker Workflow**: Builds and tests the Docker image
+
+The CI pipeline ensures all PRs maintain code quality and test coverage.
+
 ### Pull Request Process
 
 1. Fork the repository
@@ -870,6 +1119,8 @@ pytest
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+For feature requests and bug reports, please use the issue templates in the GitHub repository.
 
 ## 📄 License
 
