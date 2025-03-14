@@ -1,0 +1,798 @@
+                                              LogLLM: Log-based Anomaly Detection Using
+                                                       Large Language Models
+                                                                       Wei Guan1 , Jian Cao1∗ , Shiyou Qian1 , Jianqi Gao1 , Chun Ouyang2
+                                                                       1
+                                                                       Department of Computer Science and Engineering, SJTU, Shanghai, China
+                                                                           2
+                                                                             The School of Information Systems, QUT, Brisbane, Australia
+                                                                       {guan-wei, cao-jian, qshiyou, 193139}@sjtu.edu.cn, c.ouyang@qut.edu.au
+
+
+                                           Abstract—Software systems often record important runtime              Numerous deep learning-based methods [8]–[22] for log-
+                                        information in logs to help with troubleshooting. Log-based           based anomaly detection have been proposed. These methods
+                                        anomaly detection has become a key research area that aims            typically employ sequential deep learning models such as
+arXiv:2411.08561v4 [cs.SE] 9 Feb 2025
+
+
+
+
+                                        to identify system issues through log data, ultimately enhancing
+                                        the reliability of software systems. Traditional deep learning        LSTM [23] and transformers [24]. These methods can be
+                                        methods often struggle to capture the semantic information            further divided into reconstruction-based methods [8]–[15] and
+                                        embedded in log data, which is typically organized in natural         binary classification-based methods [16]–[22]. Reconstruction-
+                                        language. In this paper, we propose LogLLM, a log-based               based methods involve designing and training a deep neural
+                                        anomaly detection framework that leverages large language             network to reconstruct input log sequences, with anomalies
+                                        models (LLMs). LogLLM employs BERT for extracting semantic
+                                        vectors from log messages, while utilizing Llama, a transformer       detected based on reconstruction errors. The underlying prin-
+                                        decoder-based model, for classifying log sequences. Additionally,     ciple is that anomalous samples cannot be accurately recon-
+                                        we introduce a projector to align the vector representation           structed. Binary classification-based methods, on the other
+                                        spaces of BERT and Llama, ensuring a cohesive understanding           hand, involve designing a binary classifier to classify samples
+                                        of log semantics. Unlike conventional methods that require log        as either normal or anomalous. These methods often require
+                                        parsers to extract templates, LogLLM preprocesses log messages
+                                        with regular expressions, streamlining the entire process. Our        labeled anomalies for training purposes. It is recognized that
+                                        framework is trained through a novel three-stage procedure            system logs are documented in natural language and contain
+                                        designed to enhance performance and adaptability. Experimental        a significant amount of semantic information. Nevertheless,
+                                        results across four public datasets demonstrate that LogLLM out-      traditional deep learning-based methods struggle to effectively
+                                        performs state-of-the-art methods. Even when handling unstable        capture this information.
+                                        logs, it effectively captures the semantic meaning of log messages
+                                        and detects anomalies accurately.                                        In recent years, significant advancements have been
+                                           Index Terms—System log, anomaly detection, large language          achieved in LLMs, such as GPT-4 [25], Llama 3 [26], and
+                                        model, deep learning, log analysis                                    ChatGLM [27]. These models are characterized by their vast
+                                                                                                              parameter sizes and are pretrained on substantially larger
+                                                                    I. I NTRODUCTION                          datasets, ranging from several gigabytes to terabytes in size.
+                                                                                                              This extensive pretraining equips them with remarkable lan-
+                                           Ensuring high availability and reliability is crucial for large-   guage comprehension abilities, enabling superior performance
+                                        scale software-intensive systems [1], [2]. As these systems           in tasks such as summarization, paraphrasing, and instruc-
+                                        become more complex and expansive, the occurrence of                  tion following even in zero-shot scenarios [28]. Existing
+                                        anomalies becomes unavoidable [3], [4]. Even a minor issue            methods that utilize LLMs for log-based anomaly detection
+                                        can lead to performance degradation, data integrity problems,         can be categorized into prompt engineering-based [7], [29]–
+                                        and substantial losses in both customers and revenue. There-          [31] and fine-tuning-based [3], [32]–[40] approaches. Prompt
+                                        fore, anomaly detection is vital for maintaining the health and       engineering-based methods leverage the zero/few-shot capa-
+                                        stability of complex software-intensive systems [5].                  bilities of LLMs to detect anomalies based solely on the
+                                           Software-intensive systems typically produce console logs          models’ internal knowledge. However, these methods often
+                                        that record system states and critical runtime events [6].            struggle to customize solutions for specific datasets, leading to
+                                        Engineers can utilize this log data to evaluate system health,        suboptimal detection performance. Fine-tuning-based methods
+                                        identify anomalies, and trace the root causes of issues. How-         integrate LLMs into deep neural networks and tailor them to
+                                        ever, due to the potentially vast volume of logs, manually            user-specific datasets. Nevertheless, these methods encounter
+                                        analyzing them for anomalies can be both labor-intensive              challenges such as limited semantic understanding, suboptimal
+                                        and prone to mistakes [7]. Consequently, log-based anomaly            LLM utilization (relying solely on LLMs for semantic infor-
+                                        detection has emerged as a key area in automated log analysis,        mation extraction), and insufficient consideration of input data
+                                        focusing on the automatic identification of system anomalies          format, which can lead to memory overflow.
+                                        through log data.                                                        To tackle the aforementioned challenges, we propose
+                                                                                                              LogLLM, a novel log-based anomaly detection framework
+                                          ∗ Corresponding author.                                             that harnesses LLMs. Unlike traditional methods that rely on
+log parsers for template extraction, LogLLM preprocesses log       sequences. Anomalies are detected based on reconstruction er-
+messages using regular expressions, thereby streamlining the       rors. Normal log sequences can be reconstructed with minimal
+entire process. LogLLM, a fine-tuning-based method, utilizes       errors, while anomalous log sequences cannot be effectively
+BERT, a transformer encoder-based model, to extract semantic       reconstructed, resulting in significantly higher reconstruction
+vectors from log messages. Additionally, it employs Llama, a       errors. These methods consistently train the deep model on
+transformer decoder-based model, to classify log sequences.        normal data that is free of anomalies, which means they are
+To ensure coherence in log semantics, we introduce a pro-          semi-supervised.
+jector that aligns the vector representation spaces of BERT           DeepLog [8] adopts LSTM to predict the next log template
+and Llama. Our framework is trained using a novel three-           ID based on past log sequences. Similarly, LogAnomaly [9]
+stage procedure designed to enhance both performance and           predicts the next log template ID based on both sequen-
+adaptability.                                                      tial and quantitative patterns. Autoencoders (AEs) [10]–[13]
+   As we know, LLMs frequently face out-of-memory chal-            and generative adversarial networks (GANs) [14], [15] are
+lenges due to their extensive parameter sizes [41]. Directly in-   widely used in reconstruction-based methods. For example,
+putting the entire log sequence (by concatenating log messages     LogAttn [10] adopts an AE that incorporates a temporal
+into a long string) into Llama can lead to out-of-memory issues    convolutional network (TCN) to capture temporal semantic
+and potentially confuse the LLM, making it difficult to focus      correlations and a deep neural network (DNN) to capture
+on key points for distinguishing anomalies. By adopting BERT       statistical correlations. Duan et al. [14] use a GAN, where
+to summarize each log message, LogLLM effectively mitigates        an encoder-decoder framework based on LSTM serves as the
+these problems. Compared to other methods, LogLLM fully            generator. Convolutional neural networks (CNNs) are used as
+exploits the capabilities of LLMs for log-based anomaly detec-     the discriminator. The reconstruction error is calculated based
+tion. We conduct experiments across four public datasets, and      on the difference between the input and the output from the
+the results demonstrate that LogLLM outperforms state-of-the-      generator.
+art methods. Even when handling unstable logs, where new              Binary classification-based methods [16]–[22] often em-
+log templates frequently emerge due to software evolution, it      ploy deep neural networks that output either one or two values.
+effectively captures the semantic meaning of log messages and      Typically, a single value represents the probability that a
+detects anomalies accurately. The ablation study confirms the      sample belongs to the anomalous class, and anomalies are
+effectiveness of the three-stage training procedure.               detected by applying a threshold to convert this probability
+   The main contributions of our work are as follows:              into a binary classification. When two values are output, they
+   • We introduce LogLLM, a novel log-based anomaly de-            represent the probabilities of the sample belonging to the
+      tection framework leveraging LLMs. This study marks          normal and anomalous classes, respectively.
+      the first attempt to simultaneously employ transformer          Most methods [16]–[20] typically train deep models in a
+      encoder-based and decoder-based LLMs, specifically           supervised manner. For example, Zhang et al. [16] propose
+      BERT and Llama, for log-based anomaly detection.             LayerLog, which integrates word, log, and logseq layers
+   • We propose a novel three-stage procedure to optimize          to extract semantic features from log sequences. CNNs are
+      the training and coordination of different components        utilized in [17], [18] to develop a binary classifier. LogRobust
+      within the deep model, enhancing both performance and        [19] integrates a pre-trained Word2Vec model, specifically
+      adaptability.                                                FastText [42], and combines it with TF-IDF weights to learn
+   • We conduct extensive experiments on four publicly avail-      representation vectors of log templates. These vectors are
+      able real-world datasets, demonstrating that LogLLM          then fed into an attention-based Bi-LSTM model for anomaly
+      achieves exceptional performance.                            detection. LogGD [20] transforms log sequences into graphs
+                                                                   and utilizes a graph transformer neural network that combines
+                     II. R ELATED W ORK                            graph structure and node semantics for log-based anomaly
+   In this section, we explore related work in the field of        detection.
+log-based anomaly detection, with a particular focus on deep          Some work [21], [22] involves training binary classifiers
+learning-based methods. We give special attention to ap-           in a semi-supervised manner. For example, Trine [21] uses a
+proaches that utilize pretrained LLMs.                             transformer encoder [24] to encode normal log sequences into
+                                                                   vector representations and a generator to produce random fake
+A. Traditional Deep Learning for Log-based Anomaly Detec-          vector representations. The discriminator, which is composed
+tion                                                               of a transformer and a multi-layer perceptron (MLP), is trained
+   Many traditional deep learning-based methods for log-based      to distinguish whether the given vector representations are
+anomaly detection have been proposed. These works can              normal log sequences and it is subsequently used to detect
+be grouped into two types based on the training paradigm:          anomalies. PLELog [22] tackles the challenge of insufficient
+reconstruction-based methods and binary classification-based       labeling by employing probabilistic label estimation and de-
+methods.                                                           velops an attention-based GRU neural network for anomaly
+   Reconstruction-based methods [8]–[15] involve designing         detection.
+and training a deep neural network to reconstruct input log           It is acknowledged that system logs are recorded in natural
+                                                   Header                                                                    Content
+  1117838978 2005.06.03 R02-M1-N0-C:J12-U11 2005-06-03-15.49.38.026704 R02-M1-N0-C:J12-U11 RAS KERNEL INFO instruction cache parity error corrected
+  1117843015 2005.06.03 R21-M1-N6-C:J08-U11 2005-06-03-16.56.55.309974 R21-M1-N6-C:J08-U11 RAS KERNEL INFO 141 double-hummer alignment exceptions
+  1117848119 2005.06.03 R16-M1-N2-C:J17-U01 2005-06-03-18.21.59.871925 R16-M1-N2-C:J17-U01 RAS KERNEL INFO CE sym 2, at 0x0b85eee0, mask 0x05
+                                                      …                                                                         …
+
+
+                                                    Fig. 1: An example of a system log.
+
+
+language and contain a substantial amount of semantic infor-                detection by comparing each query log sequence with its
+mation. However, traditional deep learning-based methods face               nearest document log sequence. Hadadi et al. [40] directly
+challenges in capturing this information.                                   input template sequences parsed from log sequences, into an
+B. LLMs for Log-based Anomaly Detection                                     LLM and fine-tune it to accurately predict sequence labels.
+                                                                            However, this method is impractical because each template
+   Existing LLMs can be categorized into transformer encoder-               may be processed into multiple tokens by the LLM’s tokenizer,
+based models, such as BERT [43], RoBERTa [44], and Span-                    and a single template sequence can contain numerous log
+BERT [45], and transformer decoder-based models, including                  templates. Consequently, an excessive number of tokens can
+GPT-4 [25], Llama 3 [26], and ChatGLM [27]. Two prevalent                   be generated for one template sequence, which LLMs often
+strategies for utilizing LLMs are prompt engineering and fine-              cannot process due to token (memory) limitations [41].
+tuning.                                                                        LogLLM is a fine-tuning-based method that utilizes BERT
+   Prompt engineering-based methods [7], [29]–[31] detect
+                                                                            for extracting semantic vectors from log messages and Llama,
+anomalies solely by relying on the internal knowledge of
+                                                                            a transformer decoder-based model, for log sequence classi-
+LLMs. These methods typically employ transformer decoder-
+                                                                            fication. This method aligns the vector representation spaces
+based models. For instance, Qi et al. [7] employ ChatGPT for
+                                                                            of BERT and Llama using a projector. By adopting BERT,
+zero-shot and few-shot log-based anomaly detection, utilizing
+                                                                            LogLLM effectively mitigates the out-of-memory issue caused
+prompt templates that integrate the log sequence directly.
+                                                                            by excessive tokens when directly tokenizing the entire log
+However, this approach becomes impractical when using a
+                                                                            sequence with Llama’s tokenizer. Compared to other methods,
+large window size for grouping log messages. Egersdoerfer
+                                                                            LogLLM fully exploits the capabilities of LLMs for log-based
+et al. [30] address this issue by maintaining a summary-based
+                                                                            anomaly detection.
+memory, which summarizes the previous log messages, elim-
+inating the need to input the entire log sequence for anomaly                                       III. P RELIMINARIES
+detection. RAGLog [31] uses a retrieval augmented generative
+(RAG) framework [46] to analyze log entries by querying its                    To establish the groundwork for subsequent sections, we
+store of samples of normal log entries. They design prompt                  introduce the system log, which records the system’s events
+templates for LLMs to determine whether a queried log entry                 and internal states during runtime. A system log contains a
+is normal or abnormal. Prompt engineering-based methods of-                 list of log messages in chronological order.
+ten struggle to customize solutions for specific datasets, which               Fig. 1 presents a snippet of a raw system log generated
+can lead to suboptimal detection performance in particular                  by the BGL (the BlueGene/L supercomputer system), with
+datasets.                                                                   each log message ordered according to the recorded time.
+   Fine-tuning-based methods [3], [32]–[40] incorporate                     These raw log messages are semi-structured texts consisting
+LLMs into deep neural networks and customize them to the                    of a header and content. The header, determined by the
+user’s own dataset. Some methods [32]–[35], although adopt-                 logging framework, includes information such as timestamp,
+ing transformer encoder-based LLMs for anomaly detection,                   verbosity level (e.g., WARN/INFO), and component [47]. The
+do not capture the semantic information within log sequences.               log content comprises a constant part (keywords that reveal
+For example, LogBERT [32] and LAnoBERT [33] utilize                         the log template) and a variable part (parameters that carry
+BERT to reconstruct the input sequence of log template IDs                  dynamic runtime information). In this paper, we focus solely
+(IDs of log string templates) and detect anomalies based on                 on the content of each log message.
+reconstruction errors, disregarding the semantic information.                  The log messages can be grouped into log sequences
+Other methods [3], [36]–[39] use transformer encoder-based                  (i.e., series of log messages that record specific execution
+LLMs solely for extracting semantic information from log                    flows) based on session or fixed/sliding windows [48]. Session
+messages and then employ either smaller models [3], [36]–                   window partitioning groups log messages according to their
+[38] or distance-based comparison [39] for classification. For              session IDs, thereby generating sequences that include the log
+instance, NeuralLog [3] leverages BERT to extract semantic                  messages within each session. For example, Fig. 2a illustrates
+vectors from raw log messages, which are subsequently used to               the HDFS [49] logs undergoing the session window grouping
+detect anomalies via a transformer-based classification model.              process, where the block_id serves as the session ID. In con-
+Similarly, RAPID [39] utilizes transformer encoder-based                    trast, fixed/sliding window partitioning groups log messages
+models to extract semantic vectors and performs anomaly                     based on a fixed size (window size), which can be defined
+                   System Log                                                                                                      increasingly ineffective over time, making it difficult to support
+                                                                                               Log Sequence #2
+      Receiving block blk_-5632101276183739500                                         (For blk_-4506306395053060141)              subsequent anomaly detection.
+  1   src: /10.251.27.63:36433 dest: /
+      10.251.27.63:50010                              Session window
+                                                                               1
+                                                                                        Receiving block blk_-4506306395053060141
+                                                                                        src: /10.251.193.175:40709 dest: /
+                                                                                                                                      Thanks to the structured log generation process, the textual
+      BLOCK* NameSystem.allocateBlock: /user/                                           10.251.193.175:50010
+                                                                                             Log Sequence #1
+  2   root/randtxt4/_temporary/task_200811101024/
+                                                                           (For BLOCK*
+                                                                                blk_-5632101276183739500)
+                                                                                        NameSystem.allocateBlock: /user/
+                                                                                                                                   format of parameters representing specific objects can be
+      part-00999. blk_-5632101276183739500
+      Receiving block blk_-4506306395053060141
+                                                                                  root/randtxt4/_temporary/task_200811101024/
+                                                                           2Receiving   block blk_-5632101276183739500
+                                                                                  part-00999. blk_-4506306395053060141
+                                                                                                                                   easily identified using regular expressions [53]. Consequently,
+  3   src: /10.251.193.175:40709 dest: /                               1    src: /10.251.27.63:36433 dest: /
+      10.251.193.175:50010                                                 3
+                                                                                  PacketResponder 0 for block blk_-
+                                                                            10.251.27.63:50010
+                                                                                  4506306395053060141 terminating
+                                                                                                                                   we replace each variable parameter, such as account, directory
+      PacketResponder 0 for block blk_-                                     BLOCK* NameSystem.allocateBlock: /user/
+  4
+      5632101276183739500 terminating                                  2   …root/randtxt4/_temporary/task_200811101024/
+                                                                                  …                                                path, and IP address, with ‘<*>’. Despite its simplicity, this
+                                                                            part-00999. blk_-5632101276183739500
+ …    …
+                                                                               PacketResponder 0 for block blk_-
+                                                                                                                                   technique offers significant performance advantages. Com-
+                                                                       3
+                                                                               5632101276183739500 terminating
+                                                                       …       …
+                                                                                                                                   pared with log parsers, this preprocessing technique is more
+                                                                                                                                   effective and does not require training.
+                                                   (a) Session window
+                                                                                                                                   B. Model Architecture
+                                                                                                                                      As shown in Fig. 3, our deep model consists of three main
+                   System Log                                                                    Log Sequence #3
+
+  1   iar 00106ba8 dear 0246dd1c                                                   1     L3 ecc control register: 00000000
+                                                                                                                                   components: BERT, a projector, and Llama. Both BERT and
+                                                      Sliding window
+  2   5052567 floating point alignment exceptions     Window size: 2
+                                                        Step size: 2
+                                                                                   2         Log Sequence #2                       Llama are pretrained LLMs. BERT is utilized to extract vector
+  3   CE sym 25, at 0x10e1bce0, mask 0x40
+  4   invalid operation exception (software)...0
+                                                                           1       CE sym 25, at 0x10e1bce0, mask 0x40             representations of log messages, while Llama is employed to
+                                                                           2           Logoperation
+                                                                                   invalid  Sequence    #1 (software)...0
+                                                                                                    exception
+  5   L3 ecc control register: 00000000
+                                                                       1   iar 00106ba8 dear 0246dd1c
+                                                                                                                                   classify the log sequences. The projector serves as a bridge,
+ …    …
+                                                                       2   5052567 floating point alignment exceptions             aligning the vector representation spaces of BERT and Llama.
+                                                   (b) Sliding window                                                              It is important to note that our model incorporates only one
+                                                                                                                                   instance of BERT and one projector.
+  Fig. 2: Illustrative examples of log message partitioning.                                                                          1) BERT: BERT generates a semantic vector by processing
+                                                                                                                                   the semantic vector of the classification token ([CLS]) through
+by either the time span or the number of log messages. This                                                                        a linear layer followed by a tanh activation function. Each
+method creates sequences that capture snapshots of system log                                                                      log message, once preprocessed, is encoded into a semantic
+messages over time. For example, Fig. 2b illustrates the BGL                                                                       vector using the BERT tokenizer and BERT model. For a
+[50] logs undergoing the sliding window grouping process,                                                                          preprocessed log sequence, the output of BERT is a sequence
+with a window size of 2 messages and a step size of 2                                                                              of semantic vectors C = (c1 , c2 , . . . , cN ) ∈ RN ×dBERT ,
+messages.                                                                                                                          where N represents the length of the log sequence (i.e., the
+   The objective of log-based anomaly detection is to iden-                                                                        number of log messages) and dBERT is the dimension of
+tify anomalous log sequences, facilitating the recognition of                                                                      each semantic vector (i.e., hidden size). LogLLM utilizes the
+potential issues within the system’s operational behavior.                                                                         BERT base model1 , which consists of 12 layers of transformer
+                                                                                                                                   encoders and 768 hidden units in each transformer. Therefore,
+                                          IV. M ETHODOLOGY                                                                         dBERT is 768.
+                                                                                                                                      2) Projector: The projector is a linear layer that maps the
+   In this section, we present our innovative anomaly detection
+                                                                                                                                   semantic vectors C ∈ RN ×dBERT to the token embedding vec-
+framework, LogLLM. As illustrated in Fig. 3, the log sequence
+                                                                                                                                   tors accepted by Llama, represented as E = (e1 , e2 , . . . , eN ) ∈
+undergoes preprocessing using regular expressions before be-
+                                                                                                                                   RN ×dLlama , where dLlama is the hidden size of Llama. The
+ing fed into a deep neural network that integrates BERT [43],
+                                                                                                                                   projector is designed to align the vector representation spaces
+a projector, and Llama 3 [26] for log sequence classification.
+                                                                                                                                   of BERT and Llama.
+In the following sections, we will provide detailed insights
+                                                                                                                                      3) Llama: To conduct prompt tuning on Llama, the trans-
+into log sequence preprocessing, the architecture of the deep
+                                                                                                                                   former decoder-based LLM, we generate corresponding textual
+model, and the model training procedure.
+                                                                                                                                   queries based on embedded log sequences. Specifically, each
+A. Preprocessing                                                                                                                   query consists of three components.
+                                                                                                                                      The first component introduces the log sequence, such as
+   Considering that the log message content includes variable                                                                      "Below is a sequence of system log messages:". The second
+parameters carrying dynamic runtime information, which is                                                                          component comprises the token embeddings E output by the
+always irrelevant to the anomalies and complicates deep model                                                                      projector. The third component queries whether the sequence
+training, as demonstrated in Section V-F, a technique is needed                                                                    is anomalous, asking, for instance, ". Is this sequence normal
+to identify these parameters and replace them with a constant                                                                      or anomalous?". The first and third components are fed into
+token. Log parsers, such as Drain [51] and Spell [52], are                                                                         the Llama tokenizer and Llama embedding layer sequentially,
+widely adopted in log-based anomaly detection methods and                                                                          producing E1 ∈ RA×dLlama and E3 ∈ RQ×dLlama , where
+appear to be a useful technique. However, as noted by Le et al.                                                                    A and Q are the number of tokens produced by tokenizing
+[3], existing log parsers do not always perform correctly on all                                                                   the first and third components, respectively. Then, the to-
+log datasets and struggle to handle out-of-vocabulary (OOV)                                                                        ken embeddings of the three components are concatenated,
+words in new log messages, resulting in a loss of semantic
+information. When logs are unstable, these parsers become                                                                            1 https://huggingface.co/google-bert/bert-base-uncased
+                                                                                               Model Architecture
+
+                                                                                                      Llama (LLM)
+
+
+
+      Embedding                               Embedding                         Embedding                                           Embedding            Embedding                    Embedding
+        Vector              …                   Vector                            Vector                       …                      Vector               Vector          …            Vector
+
+
+
+
+                    Llama Tokenizer &                                                                                                                               Llama Tokenizer &
+                  Llama Embedding Layer
+                                                                                   Projector                   …                        Projector
+                                                                                                                                                                  Llama Embedding Layer
+
+
+
+
+                                                                Embedder
+
+
+
+
+                                                                                                                    Embedder
+                                                                               BERT Tokenizer                                      BERT Tokenizer
+                                                                                  & BERT                       …                      & BERT
+    Below is a sequence of system log messages:                                                                                                        . Is this sequence normal or anomalous? \\n
+                       Preprocessing
+
+
+
+
+                                                                       CE sym <*>, at <*>, mask <*>            …               Generating core <*>
+
+                                           Preprocess with regular expression
+
+                                       Log sequence             CE sym 2, at 0x0b85eee0, mask 0x05             …               Generating core 14627
+
+
+        Fig. 3: The framework of LogLLM. Notably, the model includes a single instance of BERT and the projector.
+
+
+represented as [E1 ||E||E3 ] ∈ R(A+N +Q)×dLlama and fed                                                      the answer template. Specifically, we train Llama to respond
+into Llama. We utilize Llama 3 8B model2 , which consists                                                    to the prompt ‘Is this sequence normal or anomalous?’ with
+of 32 transformer decoder-like layers and contains 8 billion                                                 ‘The sequence is anomalous/normal.’. This stage requires only
+parameters. Here, dLlama is 4096.                                                                            a few data samples.
+                                                                                                                Stage 2. Training the embedder of log messages: The
+C. Training                                                                                                  second stage involves training the embedder of log messages,
+   1) Minority Class Oversampling: LogLLM is a supervised                                                    specifically BERT and the projector. This stage aims to project
+anomaly detection method, which means it needs labeled nor-                                                  each log message to the embedding of the most suitable token
+mal and anomalous samples for training. However, supervised                                                  in Llama, enabling Llama to discern whether the given log
+anomaly detection methods often face the challenge of data                                                   sequence is normal or anomalous.
+imbalance, which can lead to biased model training. In an                                                       Stage 3. Fine-tuning the entire model: Finally, we
+anomaly detection task, there are only two classes: normal                                                   fine-tune the entire model to ensure cohesive and accurate
+and anomalous, and the number of instances in each class is                                                  performance across all components.
+uncertain. To cope with data imbalance, we oversample the                                                       4) Efficient Fine-Tuning on LLMs: To reduce the costs
+class with fewer samples, ensuring that the proportion of the                                                involved in fine-tuning LLMs (BERT and Llama) with a
+minority class is no less than β. Formally, let the proportion                                               substantial number of parameters, we utilize QLoRA [55]
+of the minority class be α and α < β, and the total number                                                   to minimize memory usage. QLoRA accomplishes this by
+of samples be Sample_num. To achieve a proportion of β                                                       backpropagating gradients into a frozen 4-bit quantized model,
+for the minority class, it will be oversampled to the following                                              while maintaining the performance levels achieved during the
+quantity:                                                                                                    full 16-bit fine-tuning process.
+                  β(1 − α)
+                             × Sample_num                   (1)                                                                                 V. E XPERIMENTS
+                    1−β
+                                                                                                                In this section, we conduct extensive experiments on four
+This adjustment will make the proportion of the minority class
+                                                                                                             real-life logs to investigate the following research questions
+equal to β.
+                                                                                                             (RQs):
+   2) Training Objective: Our objective is to train the deep
+                                                                                                                • RQ1: How effective is LogLLM in log-based anomaly
+model to predict whether a given log sequence is normal or
+anomalous. We fine-tune the model to respond appropriately:                                                        detection?
+                                                                                                                • RQ2: How do different preprocessing techniques impact
+if the sequence is anomalous, it outputs ‘The sequence is
+anomalous.’; if normal, it outputs ‘The sequence is normal.’.                                                      the performance of LogLLM?
+                                                                                                                • RQ3: How does each stage of the three-stage training
+We utilize cross-entropy loss [54] as our loss function.
+   3) Training Procedure: To train our deep model, we follow                                                       process influence the performance of LogLLM?
+                                                                                                                • RQ4: How do different levels of minority class over-
+three main stages.
+   Stage 1. Fine-tuning Llama to capture the answer tem-                                                           sampling, determined by the hyperparameter β, affect the
+plate: The first stage involves fine-tuning Llama to capture                                                       performance of LogLLM?
+                                                                                                                LogLLM is coded in Python, and the source code is
+ 2 https://huggingface.co/meta-llama/Meta-Llama-3-8B                                                         available at https://github.com/guanwei49/LogLLM.
+                                     TABLE I: The statistics of datasets used in the experiments.
+                                                                     Training Data                                     Testing Data
+                # Log messages   # Log sequences
+                                                   # Log sequences    # Anomalies    Anomaly ratio   # Log sequences    # Anomalies   Anomaly ratio
+   HDFS           11,175,629         575,061          460,048              13,497        2.93%          115,013            3,341         2.90%
+    BGL            4,747,963          47,135           37,708               4,009       10.63%            9,427             817          8.67%
+   Liberty         5,000,000          50,000           40,000              34,144       85.36%           10,000             651          6.51%
+ Thunderbird      10,000,000          99,997          79,997                 837         1.05%           20,000              29          0.15%
+
+
+
+A. Benchmark Methods                                                         D. Dataset
+   To verify the superiority of the proposed method, we                         To evaluate our method for log-based anomaly detection, we
+compare LogLLM with five state-of-the-art semi-supervised                    selected four public datasets [57]: HDFS, BGL, Liberty, and
+methods: DeepLog [8], LogAnomaly [9], PLELog [22], Fast-                     Thunderbird. The details for each dataset are provided below:
+LogAD [34], and LogBERT [32]. We also compare it with                           HDFS (Hadoop Distributed File System) dataset [49] is
+three supervised methods: LogRobust [19], CNN [18] and                       generated by running Hadoop-based mapreduce jobs on over
+NeuralLog [3], and one method that does not require training                 200 Amazon EC2 nodes and contains a total of 11,175,629
+a deep model but needs some normal samples for retrieval:                    log messages. These log messages are grouped into different
+RAPID [39].                                                                  log windows based on their block_id, which reflect program
+   Notably, FastLogAD, LogBERT, NeuralLog, and RAPID                         executions in the HDFS, resulting in 575,061 blocks. Among
+adopt LLMs for anomaly detection.                                            these, 16,838 blocks (2.93%) indicate system anomalies.
+                                                                                BGL (Blue Gene/L) dataset [50] is a supercomputing
+                                                                             system log dataset collected from a BlueGene/L supercom-
+B. Experimental Settings
+                                                                             puter system at lawrence livermore national labs (LLNL).
+   In our experiment, the hyperparameter β, which is described               The dataset contains 4,747,963 log messages, each of which
+in Section IV-C1, is set to 30%. We use the AdamW optimizer                  has been manually labeled as either normal or anomalous.
+[56] to train the model with a mini-batch size of 16. Unless                 There are 348,460 log messages (7.34%) that are labeled as
+otherwise specified, the training procedure is configured as                 anomalous.
+follows: In the first stage, only 1,000 samples are involved                    Thunderbird dataset [50] is a publicly accessible collection
+with a learning rate of 5e-4. The second and third stages each               of log data sourced from the Thunderbird supercomputer at
+consist of two epochs with a learning rate of 5e-5.                          sandia national laboratories (SNL). This dataset consists of
+   For a fair comparison, we configure the hyperparameters                   both normal and anomalous messages, each of which has been
+for all compared methods according to the values provided in                 manually categorized. Although the dataset contains over 200
+their original articles.                                                     million log messages, we focus on a subset of 10 million
+                                                                             continuous log messages for computational efficiency. This
+C. Metrics                                                                   subset includes 4,937 anomalous log messages, representing
+                                                                             approximately 0.049% of the total.
+  We evaluate the performance of these methods using the                        Liberty dataset [50] comprises system logs from the Liberty
+widely adopted P recision, Recall and F1 − score. These                      supercomputer at sandia national labs (SNL) in Albuquerque.
+metrics are calculated as follows:                                           This supercomputer features 512 processors and 944 GB
+                                       TP                                    of memory, and the dataset contains over 200 million log
+                     P recision =                                    (2)     messages. For computational efficiency, we sample 5 million
+                                     TP + FP
+                                                                             consecutive log messages, among which 1,600,525 are identi-
+                                     TP                                      fied as anomalous, constituting approximately 32.01% of the
+                       Recall =                                      (3)     total sampled messages.
+                                   TP + FN
+                                                                                In the context of HDFS, we adopt a session window strategy,
+                               2 ∗ P recision ∗ Recall                       which involves grouping log messages into sequences based
+               F1 −score =                                           (4)     on the block_id present in each log message. Each session is
+                                P recision + Recall
+                                                                             labeled using ground truth. For other datasets, including BGL,
+, where T P , F N , F P represent true positives, false negatives            Thunderbird, and Liberty, we utilize a sliding window strategy
+and false positives respectively.                                            to group log messages, with a window size of 100 messages
+   Precision refers to the percentage of correctly detected                  and a step size of 100 messages. A log sequence is deemed
+anomalies among all anomalies identified by the model, while                 anomalous if it contains at least one anomalous log message
+recall represents the percentage of anomalies that are correctly             according to the ground truth.
+identified from all real anomalies. The F1 -score combines                      Similar to existing work [8], [9], [19], [22], [34], [39], we
+these two metrics into a single measure, providing a balanced                split each dataset into a training set and a testing set with a
+assessment of the model’s performance in detecting anomalies.                ratio of 8:2 to evaluate the performance of a log-based anomaly
+                      TABLE II: Experimental results on HDFS, BGL, Liberty, and Thunderbird datasets.
+           Datasets                        HDFS                    BGL                      Liberty                      Thunderbird
+                      Log parser                                                                                                                Avg. F1
+ Methods
+                                   Prec.   Rec.     F1     Prec.   Rec.      F1     Prec.    Rec.        F1      Prec.      Rec.        F1
+      DeepLog                      0.835   0.994   0.908   0.166   0.988    0.285   0.751   0.855       0.800    0.017      0.966      0.033     0.506
+    LogAnomaly                     0.886   0.893   0.966   0.176   0.985    0.299   0.684   0.876       0.768    0.025      0.966      0.050     0.521
+       PLELog                      0.893   0.979   0.934   0.595   0.880    0.710   0.795   0.874       0.832    0.808      0.724      0.764     0.810
+     FastLogAD                     0.721   0.893   0.798   0.167   1.000    0.287   0.151   0.999       0.263    0.008      0.931      0.017     0.341
+      LogBERT                      0.989   0.614   0.758   0.165   0.989    0.283   0.902   0.633       0.744    0.022      0.172      0.039     0.456
+     LogRobust                     0.961   1.000   0.980   0.696   0.968    0.810   0.695   0.979       0.813    0.318      1.000      0.482     0.771
+        CNN                        0.966   1.000   0.982   0.698   0.965    0.810   0.580   0.914       0.709    0.870      0.690      0.769     0.818
+     NeuralLog                     0.971   0.988   0.979   0.792   0.884    0.835   0.875   0.926       0.900    0.794      0.931      0.857     0.893
+       RAPID                       1.000   0.859   0.924   0.874   0.399    0.548   0.911   0.611       0.732    0.200      0.207      0.203     0.602
+      LogLLM                       0.994   1.000   0.997   0.861   0.979    0.916   0.992   0.926       0.958    0.966      0.966      0.966     0.959
+
+
+
+detection approach. For the HDFS dataset, we randomly split                             TABLE III: Computational cost.
+the log sequences into training and testing data. In contrast,                              Training time (minutes)          Testing time (minutes)
+for the BGL, Thunderbird, and Liberty datasets, we adhere
+                                                                             DeepLog                    72.17                            3.42
+to a chronological split [6]. This strategy ensures that all log           LogAnomaly                  156.16                            7.25
+sequences in the training set precede those in the testing set,               PLELog                   315.47                           33.59
+reflecting real-world conditions and mitigating potential data              LogRobust                  108.42                            2.48
+                                                                               CNN                     98.16                             2.16
+leakage from unstable log data.                                             FastLogAD                  254.17                            0.29
+   Table I summarizes the statistics of the datasets used in the             LogBERT                   429.04                           43.77
+experiments.                                                                NeuralLog                  267.46                           21.44
+                                                                              RAPID                    63.98                            38.43
+                                                                             LogLLM                   1,065.15                          64.48
+E. Performance Evaluation (RQ1)
+   Table II presents the experimental results of various log-
+based anomaly detection methods on the HDFS, BGL, Liberty,            a precision of 0.167, making it impractical for real-world
+and Thunderbird datasets. The best results are highlighted in         use. Similarly, methods such as DeepLog, LogAnomaly and
+bold. We have the following observations:                             LogBERT exhibit similar issues. On the other hand, RAPID is
+   The proposed LogLLM achieves the highest F1 -score across          not sensitive enough to anomalies, leading to many undetected
+all datasets. On average, LogLLM’s F1 -scores are 6.6% better         anomalies. For instance, on the BGL dataset, RAPID achieves
+than the best existing method, NeuralLog, demonstrating its           a precision of 0.874 but a recall of only 0.399.
+effectiveness in log-based anomaly detection. Despite the                Effect of labeled anomalies (RQ2): As illustrated in Table
+adoption of LLMs in FastLogAD, LogBERT, NeuralLog, and                II, in contrast to methods such as DeepLog, LogAnomaly,
+RAPID for anomaly detection, their performance remains                FastLogAD, LogBERT, and RAPID, which require clean
+unsatisfactory. FastLogAD and LogBERT utilize BERT, a                 datasets devoid of anomalies to build anomaly detection mod-
+transformer encoder-based model, for detecting anomalies              els, methods like PLELog, LogRobust, CNN, NeuralLog, and
+based on log sequence reconstruction errors. Their inputs             LogLLM demonstrate superior performance. These models
+consist of sequences of log template IDs (IDs of log string           are trained using not only normal samples but also labeled
+templates) extracted from log messages via log parsers, lacking       anomalies. For instance, these five methods achieve an average
+semantic information. In contrast, NeuralLog and RAPID uti-           F1 -score above 0.771 across four datasets, whereas others
+lize transformer encoder-based models to extract semantic vec-        that do not utilize labeled anomalies perform poorly, with
+tors from log messages. However, NeuralLog utilizes smaller           an average F1 -score below 0.602 across four datasets. This
+models, whereas RAPID relies on distance-based comparison             demonstrates that incorporating labeled anomalies can provide
+for anomaly sequence classification. LogLLM, on the other             a significant advantage to anomaly detection methods.
+hand, leverages both BERT for extracting semantic vectors                Computational cost: The time consumption of each method
+and Llama, a transformer decoder-based LLM, for anomaly               is presented in Table III. These results have been averaged
+detection. The representation spaces of BERT and Llama are            across all the datasets.
+aligned via a projector, fully harnessing the potential of LLMs          Although RAPID does not require training a deep model,
+for log-based anomaly detection.                                      the extraction and retrieval of vector representations remain
+   Moreover, LogLLM achieves a balance between precision              time-consuming. In comparison to other methods, FastLogAD
+and recall, indicating that it maintains low false alarm rates        requires relatively high training time, but it has the shortest
+and minimizes missed reports. In contrast, methods like Fast-         testing time because it uses only the discriminator of the model
+LogAD are excessively sensitive to anomalies, often resulting         during testing. As anticipated, while our proposed LogLLM
+in numerous false alarms. For example, on the BGL dataset,            demonstrates the best performance, it also incurs the highest
+despite FastLogAD having a recall of 1, it only achieves              computational cost due to its large number of parameters.
+        TABLE IV: Effects of different preprocessing techniques on HDFS, BGL, Liberty, and Thunderbird datasets.
+                          HDFS                       BGL                        Liberty                    Thunderbird
+                                                                                                                                 Avg. F1
+                  Prec.    Rec.     F1      Prec.    Rec.      F1       Prec.    Rec.      F1      Prec.      Rec.        F1
+      Raw         0.994    0.991   0.993    0.943    0.767   0.846      0.911    0.908    0.909    0.806      0.862      0.833    0.895
+   Template ID    0.995    0.945   0.969    0.775    0.286   0.418      0.994    0.270    0.425    1.000      0.379      0.550    0.591
+    Template      0.991    1.000   0.995    0.861    0.919   0.889      0.968    0.931    0.949    0.950      0.655      0.776    0.902
+  RE (LogLLM)     0.994    1.000   0.997    0.861    0.979   0.916      0.992    0.926    0.958    0.966      0.966      0.966    0.959
+
+
+
+However, the testing time of LogLLM remains acceptable                  Skipping any training stage results in a decrease in the F1 -
+when compared to other methods that utilize LLMs, such as            score across all datasets, demonstrating the effectiveness of our
+LogBERT, NeuralLog, and RAPID.                                       three-stage training procedure. It is noteworthy that training
+                                                                     without stage 1 leads to the worst performance, with the F1 -
+F. Effects of Different Preprocessing Techniques (RQ3)               score averaged across all datasets decreasing by as much as
+   We evaluate the effectiveness of the different preprocessing      29.7%. However, training without stages 1&2 (only adopting
+techniques. The results are shown in Table IV. In this table,        training stage 3: fine-tuning the entire model) yields acceptable
+‘Raw’ indicates that the content of log messages is not              performance, with only a 3.2% decrease in the average F1 -
+preprocessed and is directly input into the proposed deep            score. This demonstrates that fine-tuning Llama to capture
+model. ‘Template’ indicates that sequences of log templates          the answer template (Stage 1) is essential before training the
+produced by Drain [51], a log parser, are used as input for          embedder (BERT and projector) of log messages (Stage 2).
+the proposed deep model. ‘Template ID’ signifies that the            Without stage 1 (i.e., directly training the embedder), the
+IDs of log templates, obtained by Drain, are simply encoded          embedder may be misdirected, resulting in incorrect semantic
+into numeric vectors using an embedding layer instead of             capture of log messages and model failure. Training without
+BERT. The preprocessing technique ‘Template ID’ renders              stage 3 yields relatively poor performance, with an average F1 -
+the model unable to capture the semantic information within          score decrease of 10.5%. This indicates that sequentially fine-
+log messages. Notably, the parser Drain is applied to the            tuning Llama and training the embedder alone is insufficient
+entire dataset, rather than only the training dataset, to avoid      for the model to capture anomalous patterns; cohesive fine-
+performance degradation due to the OOV problem. ‘RE’                 tuning of the entire model is essential. Training without stages
+indicates that regular expressions, as introduced in Section         2 and 1&2 also results in a performance decrease, with average
+IV-A, are used for preprocessing log messages.                       F1 -score reductions of 2.5% and 3.2%, respectively. This
+   As anticipated, the preprocessing technique ‘RE’ yields the       demonstrates that individually training the embedder before
+highest F1 -score across all datasets. Conversely, the prepro-       fine-tuning the entire model can also enhance performance.
+cessing technique ‘Template ID’ consistently results in the          This stage allows the embedder to generate better semantic
+lowest F1 -score across all datasets, averaging 36.8% lower          vectors of log messages for Llama to discern anomalies.
+than that of ‘RE’. This can be attributed to the fact that ‘Tem-        In summary, our proposed three-stage training procedure is
+plate ID’ hinders the model’s ability to capture the semantic        well-suited for our deep model in log-based anomaly detection.
+information within log messages, thereby impairing its capa-
+bility to detect anomalies from a natural language perspective.      H. Impact of Minority Class Oversampling
+The preprocessing techniques ‘Raw’ and ‘Template’ result                Note that normal and anomalous samples in the training
+in relatively good performance, but their F1 -scores are still       dataset are imbalanced, as shown in Table I. For the HDFS,
+6.4% and 5.7% lower than that of ‘RE’, respectively. For the         BGL, and Thunderbird datasets, normal samples outnumber
+preprocessing technique ‘Raw’, the variable parts (parameters        anomalous samples. Conversely, in the Liberty dataset, anoma-
+that carry dynamic runtime information) within the content of        lous samples exceed normal samples. As described in Section
+each log message have little influence on anomaly detection.         IV-C1, the hyper-parameter β controls the proportion of the
+However, due to their high randomness, they can confuse              minority class by oversampling to address the data imbalance
+the model, making it difficult to discern anomalies. For the         problem. In this section, we investigate the impact of β
+preprocessing technique ‘Template’, the parser is not always         by varying its value. Fig. 4 illustrates the performance of
+reliable, sometimes incorrectly removing the constant parts          LogLLM on the four datasets under different magnitudes of
+or retaining the variable parts, which can lead to information       β. When β = 0, the samples are not oversampled; instead, the
+loss or confusion for the model, making it difficult to discern      original datasets are utilized directly for training.
+anomalies.                                                              As illustrated in Fig. 4b, for the HDFS, BGL, and Thunder-
+                                                                     bird datasets, the recall always increases, while for the Liberty
+G. Ablation Study of the Training Procedure (RQ4)                    dataset, recall decreases as β increases. This can be attributed
+  We investigate the effect of each training procedure through       to the fact that for the HDFS, BGL, and Thunderbird datasets,
+an ablation study. The results are presented in Table V, where       when β increases, anomalies are oversampled, making the
+‘W/O’ denotes ‘without’. We have the following observations:         model more prone to identifying samples as anomalies. In
+           TABLE V: Ablation study of the training procedure on HDFS, BGL, Liberty, and Thunderbird datasets.
+                                                           HDFS                                                                  BGL                                                                          Liberty                                                        Thunderbird
+                                                                                                                                                                                                                                                                                                                          Avg. F1
+                                               Prec.           Rec.                F1                  Prec.                     Rec.        F1                 Prec.                                          Rec.                 F1                       Prec.                  Rec.                           F1
+   W/O Stage 1                                 0.991           1.000         0.995                     0.578                    0.971       0.725           0.685                                             0.290             0.408                    0.381                      0.828                         0.522    0.662
+   W/O Stage 2                                 0.994           1.000         0.997                     0.858                    0.920       0.888           0.995                                             0.906             0.949                    0.848                      0.966                         0.903    0.934
+  W/O Stage 1&2                                0.992           1.000         0.996                     0.853                    0.882       0.868           0.995                                             0.906             0.949                    0.897                      0.897                         0.897    0.927
+   W/O Stage 3                                 0.993           0.999         0.996                     0.704                    0.776       0.738           1.000                                             0.684             0.812                    0.958                      0.793                         0.868    0.854
+    LogLLM                                     0.994           1.000         0.997                     0.861                    0.979       0.916           0.992                                             0.926             0.958                    0.966                      0.966                         0.966    0.959
+
+
+
+                              1 .0 0                                                                                                                                                        1 .0 0
+
+                              0 .9 5
+
+                              0 .9 0                                                                                                                                                        0 .9 5
+            P r e c is io n
+
+
+
+
+                                                                                                                                                       R e c a ll
+                              0 .8 5
+
+                              0 .8 0                                                                                                                                                        0 .9 0
+
+                              0 .7 5                                                    H D F S               B G L                                                                                                                                                  H D F S              B G L
+                                                                                         L ib e r ty           T h u n d e r b ir d                                                                                                                                   L ib e r ty          T h u n d e r b ir d
+
+
+                              0 .0 0                                                                                                                                                        0 .0 0
+                                       0          1 0    2 0       3 0       4 0          5 0           6 0             7 0           8 0                                                                 0     1 0     2 0                  3 0       4 0             5 0          6 0             7 0            8 0
+                                                                            β (%)                                                                                                                                                                  β (%)
+                                                                (a) Precision                                                                                                                                                         (b) Recall
+
+                              1 .0 0                                                                                                                                                        2 5 0 0
+
+
+                                                                                                                                                                                            2 0 0 0
+                                                                                                                                                      T r a in in g tim e ( m in u te s )
+
+
+
+                              0 .9 5                                                                                                                                                                                          H D F S              B G L
+                                                                                                                                                                                                                               L ib e r ty          T h u n d e r b ir d
+
+                                                                                                                                                                                            1 5 0 0
+            F 1-s c o re
+
+
+
+
+                              0 .9 0
+                                                                                                                                                                                            1 0 0 0
+
+                              0 .8 5
+                                                                                        H D F S               B G L                                                                           5 0 0
+                                                                                         L ib e r ty           T h u n d e r b ir d
+
+
+                              0 .0 0                                                                                                                                                                  0
+                                           0       1 0   2 0          3 0    4 0          5 0           6 0             7 0           8 0                                                                 0     1 0     2 0                  3 0       4 0             5 0          6 0             7 0            8 0
+                                                                            β (%)                                                                                                                                                                  β (%)
+                                                                (c) F1 -score                                                                                                                                            (d) Training time
+
+                                                                                        Fig. 4: Impact of minority class oversampling.
+
+
+contrast, for the Liberty dataset, when β increases, normal                                                                                       samples, causing the trained model to be biased and classify
+samples are oversampled, making the model more prone to                                                                                           all samples as normal. As a result, precision, recall, and F1 -
+identifying samples as normal.                                                                                                                    score are all equal to 0.
+                                                                                                                                                     Compared to the BGL and Thunderbird datasets, the preci-
+   As illustrated in Fig. 4c, the trend of the F1 -score is basically                                                                             sion, recall and F1 -score for the HDFS and Liberty datasets
+the same across all datasets. The F1 -score increases and then                                                                                    exhibit minimal variation with respect to β. This consistency
+decreases as β increases. However, the LogLLM seems not                                                                                           arises from the more distinct patterns between abnormal and
+to be sensitive to β; when β is between 10% and 80%, the                                                                                          normal samples in the HDFS and Liberty datasets, allowing
+variation in the F1 -score is no more than 0.07. Thanks to the                                                                                    LogLLM to easily differentiate them, regardless of the ratio
+substantial semantic knowledge embedded in LLMs, a trained                                                                                        of normal and abnormal samples.
+model can effectively learn anomalous patterns and detect                                                                                            As anticipated, as β increases, the training time also in-
+anomalies, even when the minority class constitutes only 10%                                                                                      creases, as shown in Fig. 4d. This relationship arises because a
+of the dataset. However, LogLLM appears unable to effectively                                                                                     higher β leads to more oversampled data samples, as indicated
+handle extremely imbalanced scenarios. For instance, in the                                                                                       by equation (1), thereby enlarging the training dataset.
+Thunderbird dataset, anomalies constitute only 1.05% of the                                                                                          To summarize, minority class oversampling is essential;
+however, the value of the hyperparameter β does not signif-                        [14] X. Duan, S. Ying, W. Yuan, H. Cheng, and X. Yin, “A generative
+icantly impact the performance of LogLLM, making careful                                adversarial networks for log anomaly detection.” Comput. Syst. Sci. Eng.,
+                                                                                        vol. 37, no. 1, pp. 135–148, 2021.
+selection unnecessary. Moreover, excessively large values of                       [15] Z. He, Y. Tang, K. Zhao, J. Liu, and W. Chen, “Graph-based log
+β are undesirable, as they result in prolonged training times.                          anomaly detection via adversarial training,” in International Symposium
+Values between 30% and 50% are deemed acceptable.                                       on Dependable Software Engineering: Theories, Tools, and Applications.
+                                                                                        Springer, 2023, pp. 55–71.
+                           VI. C ONCLUSION                                         [16] C. Zhang, X. Wang, H. Zhang, J. Zhang, H. Zhang, C. Liu, and P. Han,
+                                                                                        “Layerlog: Log sequence anomaly detection based on hierarchical se-
+   In this paper, we propose LogLLM, a novel log-based                                  mantics,” Applied Soft Computing, vol. 132, p. 109860, 2023.
+                                                                                   [17] S. Hashemi and M. Mäntylä, “Onelog: towards end-to-end software log
+anomaly detection framework that leverages LLMs. LogLLM                                 anomaly detection,” Automated Software Engineering, vol. 31, no. 2,
+employs both transformer encoder-based and decoder-based                                p. 37, 2024.
+LLMs, specifically BERT and Llama, for log-based anomaly                           [18] S. Lu, X. Wei, Y. Li, and L. Wang, “Detecting anomaly in big data
+detection. BERT is utilized to extract semantic vectors from                            system logs using convolutional neural network,” in 2018 IEEE 16th
+                                                                                        Intl Conf on Dependable, Autonomic and Secure Computing, 16th Intl
+log messages, while Llama is used to classify log sequences.                            Conf on Pervasive Intelligence and Computing, 4th Intl Conf on Big
+To ensure coherence in log semantics, we introduce a projector                          Data Intelligence and Computing and Cyber Science and Technology
+that aligns the vector representation spaces of BERT and                                Congress (DASC/PiCom/DataCom/CyberSciTech).             IEEE, 2018, pp.
+                                                                                        151–158.
+Llama. LogLLM is trained using an innovative three-stage                           [19] X. Zhang, Y. Xu, Q. Lin, B. Qiao, H. Zhang, Y. Dang, C. Xie,
+procedure designed to enhance both performance and adapt-                               X. Yang, Q. Cheng, Z. Li et al., “Robust log-based anomaly detection on
+ability. Extensive experiments conducted on four public real-                           unstable log data,” in Proceedings of the 2019 27th ACM joint meeting
+                                                                                        on European software engineering conference and symposium on the
+world datasets demonstrate that LogLLM achieves remarkable                              foundations of software engineering, 2019, pp. 807–817.
+performance. Subsequent ablation studies further confirm the                       [20] Y. Xie, H. Zhang, and M. A. Babar, “Loggd: Detecting anomalies
+effectiveness of our three-stage training procedure.                                    from system logs with graph neural networks,” in 2022 IEEE 22nd
+                                                                                        International conference on software quality, reliability and security
+                                                                                        (QRS). IEEE, 2022, pp. 299–310.
+                               R EFERENCES                                         [21] Z. Zhao, W. Niu, X. Zhang, R. Zhang, Z. Yu, and C. Huang, “Trine:
+ [1] R. S. Kazemzadeh and H.-A. Jacobsen, “Reliable and highly available                Syslog anomaly detection with three transformer encoders in one gen-
+     distributed publish/subscribe service,” in 2009 28th IEEE International            erative adversarial network,” Applied Intelligence, vol. 52, no. 8, pp.
+     Symposium on Reliable Distributed Systems. IEEE, 2009, pp. 41–50.                  8810–8819, 2022.
+ [2] E. Bauer and R. Adams, Reliability and availability of cloud computing.       [22] L. Yang, J. Chen, Z. Wang, W. Wang, J. Jiang, X. Dong, and W. Zhang,
+     John Wiley & Sons, 2012.                                                           “Semi-supervised log-based anomaly detection via probabilistic label
+ [3] V.-H. Le and H. Zhang, “Log-based anomaly detection without log pars-              estimation,” in 2021 IEEE/ACM 43rd International Conference on
+     ing,” in 2021 36th IEEE/ACM International Conference on Automated                  Software Engineering (ICSE). IEEE, 2021, pp. 1448–1460.
+     Software Engineering (ASE). IEEE, 2021, pp. 492–504.                          [23] S. Hochreiter, “Long short-term memory,” Neural Computation MIT-
+ [4] W. Guan, J. Cao, H. Zhao, Y. Gu, and S. Qian, “Survey and benchmark                Press, 1997.
+     of anomaly detection in business processes,” IEEE Transactions on             [24] A. Vaswani, “Attention is all you need,” Advances in Neural Information
+     Knowledge and Data Engineering, pp. 1–23, 2024.                                    Processing Systems, 2017.
+ [5] S. Zhang, Y. Ji, J. Luan, X. Nie, Z. Chen, M. Ma, Y. Sun, and D. Pei,         [25] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman,
+     “End-to-end automl for unsupervised log anomaly detection,” Automated              D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat et al., “Gpt-4
+     Software Engineering (ASE’24), 2024.                                               technical report,” arXiv preprint arXiv:2303.08774, 2023.
+ [6] V.-H. Le and H. Zhang, “Log-based anomaly detection with deep                 [26] A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman,
+     learning: How far are we?” in Proceedings of the 44th international                A. Mathur, A. Schelten, A. Yang, A. Fan et al., “The llama 3 herd of
+     conference on software engineering, 2022, pp. 1356–1367.                           models,” arXiv preprint arXiv:2407.21783, 2024.
+ [7] J. Qi, S. Huang, Z. Luan, S. Yang, C. Fung, H. Yang, D. Qian, J. Shang,       [27] T. GLM, A. Zeng, B. Xu, B. Wang, C. Zhang, D. Yin, D. Rojas, G. Feng,
+     Z. Xiao, and Z. Wu, “Loggpt: Exploring chatgpt for log-based anomaly               H. Zhao, H. Lai et al., “Chatglm: A family of large language models
+     detection,” in 2023 IEEE International Conference on High Performance              from glm-130b to glm-4 all tools,” arXiv preprint arXiv:2406.12793,
+     Computing & Communications, Data Science & Systems, Smart City                     2024.
+     & Dependability in Sensor, Cloud & Big Data Systems & Application             [28] W. Guan, J. Cao, J. Gao, H. Zhao, and S. Qian, “Dabl: Detecting
+     (HPCC/DSS/SmartCity/DependSys). IEEE, 2023, pp. 273–280.                           semantic anomalies in business processes using large language models,”
+ [8] M. Du, F. Li, G. Zheng, and V. Srikumar, “Deeplog: Anomaly detection               arXiv preprint arXiv:2406.15781, 2024.
+     and diagnosis from system logs through deep learning,” in Proceedings         [29] Y. Liu, S. Tao, W. Meng, F. Yao, X. Zhao, and H. Yang, “Logprompt:
+     of the 2017 ACM SIGSAC conference on computer and communications                   Prompt engineering towards zero-shot and interpretable log analysis,” in
+     security, 2017, pp. 1285–1298.                                                     Proceedings of the 2024 IEEE/ACM 46th International Conference on
+ [9] W. Meng, Y. Liu, Y. Zhu, S. Zhang, D. Pei, Y. Liu, Y. Chen, R. Zhang,              Software Engineering: Companion Proceedings, 2024, pp. 364–365.
+     S. Tao, P. Sun et al., “Loganomaly: Unsupervised detection of sequential      [30] C. Egersdoerfer, D. Zhang, and D. Dai, “Early exploration of using
+     and quantitative anomalies in unstructured logs.” in IJCAI, vol. 19, no. 7,        chatgpt for log-based anomaly detection on parallel file systems logs,” in
+     2019, pp. 4739–4745.                                                               Proceedings of the 32nd International Symposium on High-Performance
+[10] L. Zhang, W. Li, Z. Zhang, Q. Lu, C. Hou, P. Hu, T. Gui, and S. Lu,                Parallel and Distributed Computing, 2023, pp. 315–316.
+     “Logattn: Unsupervised log anomaly detection with an autoencoder              [31] J. Pan, W. S. Liang, and Y. Yidi, “Raglog: Log anomaly detection using
+     based attention mechanism,” in International conference on knowledge               retrieval augmented generation,” in 2024 IEEE World Forum on Public
+     science, engineering and management. Springer, 2021, pp. 222–235.                  Safety Technology (WFPST). IEEE, 2024, pp. 169–174.
+[11] M. Catillo, A. Pecchia, and U. Villano, “Autolog: Anomaly detection by        [32] H. Guo, S. Yuan, and X. Wu, “Logbert: Log anomaly detection via bert,”
+     deep autoencoding of system logs,” Expert Systems with Applications,               in 2021 international joint conference on neural networks (IJCNN).
+     vol. 191, p. 116263, 2022.                                                         IEEE, 2021, pp. 1–8.
+[12] Y. Xie and K. Yang, “Log anomaly detection by adversarial autoencoders        [33] Y. Lee, J. Kim, and P. Kang, “Lanobert: System log anomaly detection
+     with graph feature fusion,” IEEE Transactions on Reliability, 2023.                based on bert masked language model,” Applied Soft Computing, vol.
+[13] X. Zhang, X. Chai, M. Yu, and D. Qiu, “Anomaly detection model                     146, p. 110689, 2023.
+     for log based on lstm network and variational autoencoder,” in 2023           [34] Y. Lin, H. Deng, and X. Li, “Fastlogad: Log anomaly detection with
+     4th International Conference on Information Science, Parallel and                  mask-guided pseudo anomaly generation and discrimination,” arXiv
+     Distributed Systems (ISPDS). IEEE, 2023, pp. 239–244.                              preprint arXiv:2404.08750, 2024.
+[35] C. Almodovar, F. Sabrina, S. Karimi, and S. Azad, “Logfit: Log anomaly
+     detection using fine-tuned language models,” IEEE Transactions on
+     Network and Service Management, 2024.
+[36] S. Chen and H. Liao, “Bert-log: Anomaly detection for system logs
+     based on pre-trained language model,” Applied Artificial Intelligence,
+     vol. 36, no. 1, p. 2145642, 2022.
+[37] J. L. Adeba, D.-H. Kim, and J. Kwak, “Sarlog: Semantic-aware robust
+     log anomaly detection via bert-augmented contrastive learning,” IEEE
+     Internet of Things Journal, 2024.
+[38] Y. Fu, K. Liang, and J. Xu, “Mlog: Mogrifier lstm-based log anomaly
+     detection approach using semantic representation,” IEEE Transactions
+     on Services Computing, vol. 16, no. 5, pp. 3537–3549, 2023.
+[39] G. No, Y. Lee, H. Kang, and P. Kang, “Training-free retrieval-based log
+     anomaly detection with pre-trained language model considering token-
+     level information,” Engineering Applications of Artificial Intelligence,
+     vol. 133, p. 108613, 2024.
+[40] F. Hadadi, Q. Xu, D. Bianculli, and L. Briand, “Anomaly detection on
+     unstable logs with gpt models,” arXiv preprint arXiv:2406.07467, 2024.
+[41] M. Burtsev, M. Reeves, and A. Job, “The working limitations of large
+     language models,” MIT Sloan Management Review, vol. 65, no. 2, pp.
+     8–10, 2024.
+[42] A. Joulin, “Fasttext. zip: Compressing text classification models,” arXiv
+     preprint arXiv:1612.03651, 2016.
+[43] J. Devlin, “Bert: Pre-training of deep bidirectional transformers for
+     language understanding,” arXiv preprint arXiv:1810.04805, 2018.
+[44] Y. Liu, “Roberta: A robustly optimized bert pretraining approach,” arXiv
+     preprint arXiv:1907.11692, 2019.
+[45] M. Joshi, D. Chen, Y. Liu, D. S. Weld, L. Zettlemoyer, and O. Levy,
+     “Spanbert: Improving pre-training by representing and predicting spans,”
+     Transactions of the association for computational linguistics, vol. 8, pp.
+     64–77, 2020.
+[46] P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal,
+     H. Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel et al., “Retrieval-
+     augmented generation for knowledge-intensive nlp tasks,” Advances in
+     Neural Information Processing Systems, vol. 33, pp. 9459–9474, 2020.
+[47] J. Zhu, S. He, J. Liu, P. He, Q. Xie, Z. Zheng, and M. R. Lyu, “Tools
+     and benchmarks for automated log parsing,” in 2019 IEEE/ACM 41st In-
+     ternational Conference on Software Engineering: Software Engineering
+     in Practice (ICSE-SEIP). IEEE, 2019, pp. 121–130.
+[48] P. He, J. Zhu, S. He, J. Li, and M. R. Lyu, “An evaluation study on
+     log parsing and its use in log mining,” in 2016 46th annual IEEE/IFIP
+     international conference on dependable systems and networks (DSN).
+     IEEE, 2016, pp. 654–661.
+[49] W. Xu, L. Huang, A. Fox, D. Patterson, and M. Jordan, “Online system
+     problem detection by mining patterns of console logs,” in 2009 ninth
+     IEEE international conference on data mining. IEEE, 2009, pp. 588–
+     597.
+[50] A. Oliner and J. Stearley, “What supercomputers say: A study of five
+     system logs,” in 37th annual IEEE/IFIP international conference on
+     dependable systems and networks (DSN’07). IEEE, 2007, pp. 575–
+     584.
+[51] P. He, J. Zhu, Z. Zheng, and M. R. Lyu, “Drain: An online log parsing
+     approach with fixed depth tree,” in 2017 IEEE international conference
+     on web services (ICWS). IEEE, 2017, pp. 33–40.
+[52] M. Du and F. Li, “Spell: Streaming parsing of system event logs,” in
+     2016 IEEE 16th International Conference on Data Mining (ICDM).
+     IEEE, 2016, pp. 859–864.
+[53] V.-H. Le and H. Zhang, “Log parsing with prompt-based few-shot
+     learning,” in 2023 IEEE/ACM 45th International Conference on Software
+     Engineering (ICSE). IEEE, 2023, pp. 2438–2449.
+[54] J. S. Bridle, “Probabilistic interpretation of feedforward classification
+     network outputs, with relationships to statistical pattern recognition,” in
+     Neurocomputing: Algorithms, architectures and applications. Springer,
+     1990, pp. 227–236.
+[55] T. Dettmers, A. Pagnoni, A. Holtzman, and L. Zettlemoyer, “Qlora:
+     Efficient finetuning of quantized llms,” Advances in Neural Information
+     Processing Systems, vol. 36, 2024.
+[56] I. Loshchilov, “Decoupled weight decay regularization,” arXiv preprint
+     arXiv:1711.05101, 2017.
+[57] J. Zhu, S. He, P. He, J. Liu, and M. R. Lyu, “Loghub: A large collection
+     of system log datasets for ai-driven log analytics,” in 2023 IEEE 34th
+     International Symposium on Software Reliability Engineering (ISSRE).
+     IEEE, 2023, pp. 355–366.
+
