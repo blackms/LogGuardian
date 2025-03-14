@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # Main LogGuardian API service
+  logguardian-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: logguardian:latest
+    container_name: logguardian-api
+    restart: unless-stopped
+    command: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      - LOG_LEVEL=INFO
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_CACHE_DIR=/app/models
+      - MODEL_CONFIG_PATH=/app/config/model_config.json
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_WORKERS=1
+      - MAX_BATCH_SIZE=16
+      - ENABLE_AUTH=false
+    networks:
+      - logguardian-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # LogGuardian training service (can be started on demand)
+  logguardian-train:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: logguardian:latest
+    container_name: logguardian-train
+    command: train --data_path /app/data/hdfs --output_dir /app/models/output --batch_size 16
+    profiles:
+      - training
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      - LOG_LEVEL=INFO
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_CACHE_DIR=/app/models
+    networks:
+      - logguardian-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:alpine
+    container_name: logguardian-redis
+    restart: unless-stopped
+    profiles:
+      - cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - logguardian-network
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: logguardian-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - logguardian-network
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: logguardian-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    networks:
+      - logguardian-network
+    depends_on:
+      - prometheus
+
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  logguardian-network:
+    driver: bridge
