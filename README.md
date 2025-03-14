@@ -18,13 +18,14 @@
 - [Configuration Options](#configuration-options)
 - [Datasets](#datasets)
 - [Training](#training)
+- [Evaluation](#evaluation)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## 🌟 Overview
 
-LogGuardian is a Python-based log anomaly detection system leveraging large language models (LLMs) to detect anomalies in system logs by combining semantic extraction and classification. The system utilizes a novel approach that extracts semantic features from logs using BERT, aligns them with an LLM's embedding space, and performs anomaly classification using Llama 3.
+LogGuardian is a Python-based log anomaly detection system leveraging large language models (LLMs) to detect anomalies in system logs by combining semantic extraction and classification. The system implements the LogLLM methodology, extracting semantic features from logs using BERT, aligning them with an LLM's embedding space, and performing anomaly classification using Llama 3.
 
 ### Target Audience
 
@@ -38,15 +39,25 @@ LogGuardian is designed for:
 
 - **Advanced Preprocessing**: Automatically masks variable parts (IPs, timestamps, paths) in logs
 - **Semantic Understanding**: Captures the contextual meaning of log messages
+- **Three-Stage Training**: Implements the specialized training procedure from the LogLLM paper:
+  - Stage 1: LLM template fine-tuning
+  - Stage 2: BERT and projector training
+  - Stage 3: End-to-end fine-tuning
+- **Data Imbalance Handling**: Implements minority class oversampling with configurable target proportion
+- **Comprehensive Dataset Support**: Works with all standard benchmark datasets:
+  - HDFS (Hadoop Distributed File System logs)
+  - BGL (Blue Gene/L supercomputer logs)
+  - Liberty (Liberty supercomputer logs)
+  - Thunderbird (Thunderbird supercomputer logs)
 - **High Accuracy**: Achieves F1-scores above 0.95 on benchmark datasets
+- **Evaluation Framework**: Includes metrics, evaluator, and benchmark tools for rigorous performance assessment
 - **Resource Efficient**: Uses QLoRA for memory-efficient fine-tuning
 - **Flexible Pipeline**: Modular design allows component replacement or customization
-- **Multiple Dataset Support**: Works with HDFS and other standard benchmark datasets
 - **Easy Integration**: Simple API for incorporating into existing monitoring systems
 
 ## 🏗️ Architecture
 
-LogGuardian follows a modular pipeline architecture with four main components:
+LogGuardian follows a modular pipeline architecture with the following components:
 
 ```mermaid
 graph LR
@@ -61,6 +72,23 @@ graph LR
 2. **Semantic Feature Extraction**: Uses BERT to encode logs into semantic vectors
 3. **Embedding Alignment**: Projects BERT embeddings to be compatible with LLM embedding space
 4. **Sequence Classification**: Uses Llama 3 to classify log sequences as normal or anomalous
+
+### Three-Stage Training Process
+
+The system implements the LogLLM training methodology with three key stages:
+
+```mermaid
+graph TD
+    A[Raw Logs] --> B[Preprocessing]
+    B --> C[Stage 1: LLM Template Fine-tuning]
+    C --> D[Stage 2: BERT+Projector Training]
+    D --> E[Stage 3: End-to-End Fine-tuning]
+    E --> F[Evaluation]
+```
+
+1. **Stage 1**: Fine-tune Llama to capture the answer template with a small number of examples
+2. **Stage 2**: Train the embedder (BERT + projector) while keeping the fine-tuned Llama frozen
+3. **Stage 3**: Fine-tune the entire model end-to-end for optimal performance
 
 ## 🔧 Prerequisites
 
@@ -351,6 +379,61 @@ LlamaLogClassifier(
 - `save(path)`: Save the classifier to a directory
 - `load(path, device=None, device_map="auto", **kwargs)`: Load a classifier from a directory
 
+### Training Classes
+
+#### ThreeStageTrainer
+
+```python
+ThreeStageTrainer(
+    model,  # LogGuardian model to train
+    device=None,  # Optional: Device to use for training
+    config=None  # Optional: Configuration parameters
+)
+```
+
+**Methods:**
+- `setup_stage1(learning_rate=5e-4, warmup_steps=100, weight_decay=0.01, **kwargs)`: Set up Stage 1 training
+- `setup_stage2(learning_rate=5e-5, warmup_steps=0, weight_decay=0.01, **kwargs)`: Set up Stage 2 training
+- `setup_stage3(learning_rate=5e-5, warmup_steps=0, weight_decay=0.01, **kwargs)`: Set up Stage 3 training
+- `run_stage1(train_loader, criterion, eval_loader=None, metrics=None, num_epochs=1, num_samples=1000, **kwargs)`: Run Stage 1 training
+- `run_stage2(train_loader, criterion, eval_loader=None, metrics=None, num_epochs=2, **kwargs)`: Run Stage 2 training
+- `run_stage3(train_loader, criterion, eval_loader=None, metrics=None, num_epochs=2, **kwargs)`: Run Stage 3 training
+- `train(train_loader, criterion, eval_loader=None, metrics=None, **kwargs)`: Run complete three-stage training
+
+### Evaluation Classes
+
+#### Evaluator
+
+```python
+Evaluator(
+    model,  # LogGuardian model to evaluate
+    config=None  # Optional: Configuration parameters
+)
+```
+
+**Methods:**
+- `evaluate(test_logs, test_labels, dataset_name="unnamed_dataset", batch_size=16, raw_output=True, save_results=True, **kwargs)`: Evaluate model on test dataset
+- `cross_validate(logs, labels, dataset_name="unnamed_dataset", n_splits=5, stratify=True, random_state=42, time_based=False, **kwargs)`: Perform cross-validation
+- `generate_report(dataset_results=None, output_file=None)`: Generate evaluation report
+
+#### LogAnomalyBenchmark
+
+```python
+LogAnomalyBenchmark(
+    methods=None,  # Dictionary of methods to benchmark, mapping method names to models
+    datasets=None,  # Dictionary of datasets to benchmark on, mapping dataset names to (logs, labels) tuples
+    config=None  # Optional: Configuration parameters
+)
+```
+
+**Methods:**
+- `add_method(name, model)`: Add a method to benchmark
+- `add_dataset(name, logs, labels)`: Add a dataset to benchmark on
+- `load_dataset_from_loader(name, loader, split=True, test_size=0.2, shuffle=False, random_state=42)`: Load a dataset from a data loader
+- `run(method_names=None, dataset_names=None, save_results=True, generate_report=True, train_methods=True, **kwargs)`: Run benchmark
+- `generate_report(benchmark_results=None, output_file=None)`: Generate benchmark report
+- `create_comparison_visualizations(metric="f1", output_dir=None)`: Create comparative visualizations
+
 ## ⚙️ Configuration Options
 
 LogGuardian can be configured through the `config` parameter when creating an instance. Here's an example configuration:
@@ -427,14 +510,120 @@ train_logs, train_labels, test_logs, test_labels = loader.get_train_test_split(
 )
 ```
 
-### Other Supported Datasets
+### BGL Dataset
 
-- BGL (Blue Gene/L Supercomputer Logs)
-- Thunderbird
-- Liberty
-- Custom log datasets
+The Blue Gene/L (BGL) dataset contains logs from a supercomputer at Lawrence Livermore National Labs.
+
+```python
+from logguardian.data.loaders import BGLLoader
+
+# Create loader with sliding window configuration
+loader = BGLLoader(
+    preprocessor=preprocessor,
+    config={
+        "data_path": "path/to/bgl",
+        "window_size": 100,
+        "step_size": 100
+    }
+)
+
+# Load and split data with chronological ordering
+logs, labels = loader.load()
+train_logs, train_labels, test_logs, test_labels = loader.get_train_test_split(
+    test_size=0.2,
+    shuffle=False  # Use chronological splitting
+)
+```
+
+### Liberty and Thunderbird Datasets
+
+Similar to BGL, Liberty and Thunderbird datasets contain logs from supercomputer systems.
+
+```python
+from logguardian.data.loaders import LibertyLoader, ThunderbirdLoader
+
+# Load Liberty dataset
+liberty_loader = LibertyLoader(
+    preprocessor=preprocessor,
+    config={"data_path": "path/to/liberty", "window_size": 100, "step_size": 100}
+)
+
+# Load Thunderbird dataset
+thunderbird_loader = ThunderbirdLoader(
+    preprocessor=preprocessor,
+    config={"data_path": "path/to/thunderbird", "window_size": 100, "step_size": 100}
+)
+```
+
+### Example: Loading Multiple Datasets
+
+```python
+from logguardian.data.loaders import HDFSLoader, BGLLoader, LibertyLoader, ThunderbirdLoader
+from logguardian.evaluation.benchmark import LogAnomalyBenchmark
+
+# Create benchmark object
+benchmark = LogAnomalyBenchmark()
+
+# Load datasets
+benchmark.load_dataset_from_loader("hdfs", HDFSLoader(data_path="path/to/hdfs"))
+benchmark.load_dataset_from_loader("bgl", BGLLoader(data_path="path/to/bgl"))
+benchmark.load_dataset_from_loader("liberty", LibertyLoader(data_path="path/to/liberty"))
+benchmark.load_dataset_from_loader("thunderbird", ThunderbirdLoader(data_path="path/to/thunderbird"))
+```
 
 ## 🏋️ Training
+
+LogGuardian implements the three-stage training procedure described in the LogLLM paper.
+
+### Three-Stage Training
+
+```python
+from logguardian import LogGuardian
+from logguardian.data.loaders import HDFSLoader
+from logguardian.training.three_stage_trainer import ThreeStageTrainer
+import torch.nn as nn
+
+# Load dataset
+loader = HDFSLoader(data_path="path/to/hdfs")
+train_logs, train_labels, test_logs, test_labels = loader.get_train_test_split()
+
+# Create dataset and data loader
+# [Code for creating PyTorch DataLoader]
+
+# Initialize detector
+detector = LogGuardian()
+
+# Create trainer
+trainer = ThreeStageTrainer(detector)
+
+# Define loss function
+criterion = nn.CrossEntropyLoss()
+
+# Run three-stage training
+results = trainer.train(
+    train_loader=train_loader,
+    criterion=criterion,
+    eval_loader=val_loader,
+    num_epochs_stage1=1,
+    num_samples_stage1=1000,
+    num_epochs_stage2=2,
+    num_epochs_stage3=2,
+    learning_rate_stage1=5e-4,
+    learning_rate_stage2=5e-5,
+    learning_rate_stage3=5e-5
+)
+
+# Save the trained model
+detector.save("trained_model")
+```
+
+### Using the Training Example Script
+
+LogGuardian includes a comprehensive training example script:
+
+```bash
+python -m logguardian.examples.train_with_three_stage --data_path path/to/hdfs --output_dir output --batch_size 16 --beta 0.3
+```
 
 ### Fine-tuning with LoRA
 
@@ -483,6 +672,77 @@ for epoch in range(num_epochs):
 
 # Save the fine-tuned model
 detector.save("fine_tuned_model")
+```
+
+## 📊 Evaluation
+
+LogGuardian includes a comprehensive evaluation framework for assessing model performance.
+
+### Basic Evaluation
+
+```python
+from logguardian import LogGuardian
+from logguardian.data.loaders import HDFSLoader
+from logguardian.evaluation.evaluator import Evaluator
+
+# Load model
+detector = LogGuardian.load("path/to/model")
+
+# Load test data
+loader = HDFSLoader(data_path="path/to/hdfs")
+_, _, test_logs, test_labels = loader.get_train_test_split(test_size=0.2)
+
+# Create evaluator
+evaluator = Evaluator(detector, config={"output_dir": "evaluation_results"})
+
+# Evaluate model
+results = evaluator.evaluate(
+    test_logs=test_logs,
+    test_labels=test_labels,
+    dataset_name="hdfs_test",
+    batch_size=16
+)
+
+# Generate report
+report = evaluator.generate_report(output_file="evaluation_report.md")
+```
+
+### Benchmarking
+
+```python
+from logguardian import LogGuardian
+from logguardian.data.loaders import HDFSLoader, BGLLoader
+from logguardian.evaluation.benchmark import LogAnomalyBenchmark
+
+# Create benchmark object
+benchmark = LogAnomalyBenchmark(
+    config={"output_dir": "benchmark_results"}
+)
+
+# Load datasets
+benchmark.load_dataset_from_loader("hdfs", HDFSLoader(data_path="path/to/hdfs"))
+benchmark.load_dataset_from_loader("bgl", BGLLoader(data_path="path/to/bgl"))
+
+# Add methods
+benchmark.add_method("LogGuardian", LogGuardian())
+# Add other methods for comparison
+
+# Run benchmark
+results = benchmark.run(
+    save_results=True,
+    generate_report=True
+)
+
+# Create visualizations
+benchmark.create_comparison_visualizations(metric="f1")
+```
+
+### Using the Benchmark Example Script
+
+LogGuardian includes a comprehensive benchmark example script:
+
+```bash
+python -m logguardian.examples.benchmark_example --data_dir path/to/datasets --datasets hdfs bgl liberty thunderbird --include_baselines --output_dir benchmark_results
 ```
 
 ## 🔍 Troubleshooting
