@@ -275,6 +275,34 @@ graph TD
 
 The preprocessing component is responsible for cleaning and standardizing log messages before they are fed into the machine learning models. This is handled by the `SystemLogPreprocessor` class in `logguardian/data/preprocessors/system_log_preprocessor.py`.
 
+```mermaid
+flowchart TD
+    A[Raw Log Message] --> B[Input to Preprocessor]
+    B --> C{Case Sensitive?}
+    C -->|No| D[Convert to Lowercase]
+    C -->|Yes| E[Keep Original Case]
+    D --> F[Apply Regex Patterns]
+    E --> F
+    F --> G{Remove Punctuation?}
+    G -->|Yes| H[Remove Punctuation]
+    G -->|No| I[Keep Punctuation]
+    H --> J[Remove Extra Whitespace]
+    I --> J
+    J --> K[Preprocessed Log Message]
+    
+    subgraph "Regex Pattern Replacement"
+        F1[IP Address Pattern] --> F2[Replace with <IP>]
+        F3[Timestamp Pattern] --> F4[Replace with <TIMESTAMP>]
+        F5[File Path Pattern] --> F6[Replace with <PATH>]
+        F7[Number Pattern] --> F8[Replace with <NUM>]
+    end
+    
+    F --> F1
+    F --> F3
+    F --> F5
+    F --> F7
+```
+
 Key features of the preprocessor:
 
 - **Variable Masking**: Replaces dynamic parts of log messages (IPs, timestamps, file paths, etc.) with constant tokens using regular expressions
@@ -283,6 +311,17 @@ Key features of the preprocessor:
 - **Extensibility**: Allows adding custom patterns for variable masking
 
 Example of preprocessing:
+
+```mermaid
+graph TD
+    A["2023-02-15 10:12:34 ERROR [server.Database] Failed to execute query: table 'users' doesn't exist"] --> B["Identify Variable Parts"]
+    B --> C["Replace Timestamp: <TIMESTAMP>"]
+    C --> D["Replace Table Name: <*>"]
+    D --> E["<TIMESTAMP> ERROR [server.Database] Failed to execute query: table '<*>' doesn't exist"]
+    
+    style A fill:#f9d5e5,stroke:#333,stroke-width:1px
+    style E fill:#d5f9e5,stroke:#333,stroke-width:1px
+```
 
 ```python
 # Original log message
@@ -644,6 +683,54 @@ services:
 
 LogGuardian includes a comprehensive evaluation framework for assessing model performance, implemented in `logguardian/evaluation/evaluator.py` and `logguardian/evaluation/benchmark.py`.
 
+```mermaid
+flowchart TD
+    subgraph "Input"
+        A1[Test Logs]
+        A2[Ground Truth Labels]
+    end
+    
+    subgraph "Evaluation Process"
+        B1[Model Inference]
+        B2[Compute Metrics]
+        B3[Generate Visualizations]
+        B4[Find Optimal Threshold]
+    end
+    
+    subgraph "Output"
+        C1[Precision, Recall, F1]
+        C2[Confusion Matrix]
+        C3[ROC & PR Curves]
+        C4[Threshold Analysis]
+        C5[Evaluation Report]
+    end
+    
+    A1 --> B1
+    A2 --> B2
+    B1 --> B2
+    B2 --> B3
+    B2 --> B4
+    B3 --> C2
+    B3 --> C3
+    B3 --> C4
+    B4 --> C1
+    B2 --> C1
+    B3 --> C5
+    B4 --> C5
+    C1 --> C5
+    C2 --> C5
+    C3 --> C5
+    C4 --> C5
+    
+    classDef input fill:#d0f0c0
+    classDef process fill:#c0d0f0
+    classDef output fill:#f0c0c0
+    
+    class A1,A2 input
+    class B1,B2,B3,B4 process
+    class C1,C2,C3,C4,C5 output
+```
+
 ### Evaluator
 
 The `Evaluator` class provides methods for evaluating LogGuardian models on various log datasets, computing performance metrics, and visualizing results.
@@ -677,6 +764,47 @@ report = evaluator.generate_report(output_file="evaluation_report.md")
 ### Benchmark
 
 The `LogAnomalyBenchmark` class provides a framework for benchmarking multiple anomaly detection methods on multiple datasets.
+
+```mermaid
+flowchart TD
+    subgraph "Input"
+        A1[Multiple Datasets]
+        A2[Multiple Methods]
+    end
+    
+    subgraph "Benchmarking Process"
+        B1[Load Datasets]
+        B2[Initialize Methods]
+        B3[Run Evaluation for Each Method on Each Dataset]
+        B4[Collect Results]
+        B5[Generate Comparative Analysis]
+    end
+    
+    subgraph "Output"
+        C1[Performance Metrics]
+        C2[Comparative Visualizations]
+        C3[Benchmark Report]
+    end
+    
+    A1 --> B1
+    A2 --> B2
+    B1 --> B3
+    B2 --> B3
+    B3 --> B4
+    B4 --> B5
+    B5 --> C1
+    B5 --> C2
+    C1 --> C3
+    C2 --> C3
+    
+    classDef input fill:#d0f0c0
+    classDef process fill:#c0d0f0
+    classDef output fill:#f0c0c0
+    
+    class A1,A2 input
+    class B1,B2,B3,B4,B5 process
+    class C1,C2,C3 output
+```
 
 Key features of the benchmark:
 
